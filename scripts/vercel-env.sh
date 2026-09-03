@@ -32,6 +32,20 @@ fi
 TOKEN_ARG=""
 [ -n "${VERCEL_TOKEN:-}" ] && TOKEN_ARG="--token $VERCEL_TOKEN"
 
+# Vercel refuses to store a credential-looking value under a NEXT_PUBLIC_ name
+# without an explicit type, and it asks interactively — which a piped stdin can
+# never answer, so the add fails silently. NEXT_PUBLIC_* values are shipped to
+# browsers by definition, so declare them "config"; everything else is "secret".
+add_var() {
+  _key="$1"; _val="$2"; _target="$3"
+  case "$_key" in
+    NEXT_PUBLIC_*) _type="config" ;;
+    *)             _type="secret" ;;
+  esac
+  $VC env add "$_key" "$_target" --type "$_type" --value "$_val" --yes $TOKEN_ARG 2>&1
+}
+
+
 # ---- 1. authenticate -------------------------------------------------------
 echo "→ Checking Vercel authentication…"
 if ! $VC whoami $TOKEN_ARG >/dev/null 2>&1; then
@@ -71,16 +85,20 @@ while IFS= read -r line || [ -n "$line" ]; do
     skipped=$((skipped+1)); continue
   fi
 
-  ok=1
+  ok=1; err=""
   for target in production preview development; do
     $VC env rm "$key" "$target" --yes $TOKEN_ARG >/dev/null 2>&1 || true
-    printf '%s' "$value" | $VC env add "$key" "$target" $TOKEN_ARG >/dev/null 2>&1 || ok=0
+    out="$(add_var "$key" "$value" "$target")" || { ok=0; err="$out"; }
   done
 
   if [ $ok -eq 1 ]; then
     echo "  ✔ $key"; pushed=$((pushed+1))
   else
-    echo "  ✖ $key  (failed)"; failed=$((failed+1))
+    echo "  ✖ $key  (failed)"
+    # Show the reason rather than swallowing it — the silent version of this
+    # shipped a deployment missing its Supabase key.
+    printf '%s\n' "$err" | tail -4 | sed 's/^/      /'
+    failed=$((failed+1))
   fi
 done < "$ENV_FILE"
 
@@ -115,7 +133,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     value="${value%\"}"; value="${value#\"}"
     for target in production preview development; do
       $VC env rm "$key" "$target" --yes $TOKEN_ARG >/dev/null 2>&1 || true
-      printf '%s' "$value" | $VC env add "$key" "$target" $TOKEN_ARG >/dev/null 2>&1 || true
+      add_var "$key" "$value" "$target" >/dev/null 2>&1 || true
     done
   fi
 done < "$ENV_FILE"
