@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button, Input, Overline, Spinner } from "@/components/ui";
 
@@ -11,6 +12,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const search = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -102,17 +104,36 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
             <label className="mb-2 block font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
               Password
             </label>
-            <Input
-              type="password"
-              required
-              minLength={6}
-              placeholder="min 6 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={6}
+                placeholder="min 6 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                className="pr-11"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                // tabIndex -1 keeps Tab going straight from password to submit,
+                // which is what people expect when filling a login form.
+                tabIndex={-1}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-2 text-dim transition-colors hover:text-fg focus-visible:text-fg focus-visible:outline-none"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
 
           {error && (

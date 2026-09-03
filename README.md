@@ -15,8 +15,8 @@ A read-write demo account is available so you can explore everything immediately
 | | |
 |---|---|
 | **URL** | https://cortexa-kappa.vercel.app |
-| **Email** | `DEMO_EMAIL_PLACEHOLDER` |
-| **Password** | `DEMO_PASSWORD_PLACEHOLDER` |
+| **Email** | `demo@gmail.com` |
+| **Password** | `demo@2026` |
 
 Once you're in, this sequence shows what the system actually does — watch the
 route badge above each answer:
