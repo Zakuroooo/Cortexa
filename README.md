@@ -4,7 +4,33 @@
 
 **Agentic RAG over live data and memory · 100% free-tier stack**
 
+**[▶ Live demo](https://cortexa-kappa.vercel.app)**
+
 </div>
+
+## Try it without signing up
+
+A read-write demo account is available so you can explore everything immediately:
+
+| | |
+|---|---|
+| **URL** | https://cortexa-kappa.vercel.app |
+| **Email** | `DEMO_EMAIL_PLACEHOLDER` |
+| **Password** | `DEMO_PASSWORD_PLACEHOLDER` |
+
+Once you're in, this sequence shows what the system actually does — watch the
+route badge above each answer:
+
+1. `hi` → routes **direct**, no retrieval wasted on small talk
+2. `What's the weather in Kolkata right now?` → routes **agent**, fetches live conditions
+3. `Remember that I'm evaluating this project for a role.` → a **"remembered for next time"** card appears
+4. Start a **new chat** → `What do you know about me?` → routes **memory**, and it still knows
+
+Step 4 is the point. That is cross-session recall from a separate table, not
+conversation history — a new chat has no history to draw on.
+
+> The demo account is shared, so documents and memories you add are visible to
+> other visitors. Please don't upload anything private.
 
 ## What is it?
 
@@ -226,6 +252,31 @@ agent limit keeps most turns well under 60s.
 - **Ingestion is inline.** A very large PDF can exceed the 60s function limit. A background job queue is on the roadmap.
 - **No rate limiting.** Fine for a personal deployment; add it before sharing the URL widely, since every request costs you LLM tokens.
 - **The MCP server is local-only** (stdio transport). It is not part of the Vercel deployment.
+
+## Rate limits
+
+The public deployment is throttled, since every turn spends real LLM quota:
+
+| Action | Per visitor | Per account |
+|---|---|---|
+| Chat messages | 30 / hour | 300 / hour |
+| Document uploads | 10 / hour | 60 / hour |
+
+Limits are keyed on **account + IP**, with a wider account-wide ceiling behind
+them. One shared demo login otherwise means the first visitor exhausts the
+allowance for everyone, while keying on IP alone leaves total spend unbounded —
+so both apply, and whichever trips first wins.
+
+Counters live in Postgres, not in memory: serverless instances don't share
+state, so an in-memory limiter would reset on every cold start. The check and
+the record happen in one statement so two concurrent requests can't both see
+themselves as under the limit.
+
+Exceeding a limit returns `429` with `Retry-After` and a readable message; the
+chat UI restores your unsent message rather than losing it.
+
+Set `RATE_LIMIT_DISABLED=true` to turn limits off locally. They are inactive in
+development by default.
 
 ## Troubleshooting
 

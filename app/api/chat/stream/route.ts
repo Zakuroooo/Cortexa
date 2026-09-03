@@ -25,6 +25,11 @@ import type {
   RouteDecision,
 } from "@/types";
 import { truncate } from "@/lib/utils";
+import {
+  checkRateLimit,
+  limitHeaders,
+  friendlyWait,
+} from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 // Vercel's Hobby plan caps function duration at 60s. Raise this (up to 300)
@@ -43,6 +48,19 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user)
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  // The deployment is public, so throttle before spending any LLM quota.
+  const limit = await checkRateLimit(supabase, user.id, "chat", request);
+  if (!limit.allowed) {
+    return Response.json(
+      {
+        error:
+          `Rate limit reached — ${limit.limit} messages per hour. ` +
+          `Try again in ${friendlyWait(limit.resetSeconds)}.`,
+      },
+      { status: 429, headers: limitHeaders(limit) }
+    );
+  }
 
   const body = await request.json();
   const chatId: string = body.chatId;

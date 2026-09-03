@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { checkRateLimit, limitHeaders, friendlyWait } from "@/lib/ratelimit";
 import { chunkText } from "@/lib/ai/chunking";
 import { embedTexts } from "@/lib/ai/embeddings";
 import { fetchUrlText } from "@/lib/ai/tools";
@@ -50,6 +51,20 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Ingestion runs embeddings over the whole document, so it is the other
+  // endpoint that can burn real quota.
+  const limit = await checkRateLimit(supabase, user.id, "ingest", request);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          `Upload limit reached — ${limit.limit} documents per hour. ` +
+          `Try again in ${friendlyWait(limit.resetSeconds)}.`,
+      },
+      { status: 429, headers: limitHeaders(limit) }
+    );
+  }
 
   let docId: string | null = null;
   let providedTitle: string | undefined;

@@ -273,3 +273,76 @@ as $$
    where user_id = auth.uid()
      and id = any(memory_ids);
 $$;
+
+-- ============================================================
+-- RATE LIMITING
+-- The deployed app is public, and every chat turn spends real LLM quota.
+-- Serverless instances don't share memory, so the counter lives in Postgres.
+-- ============================================================
+create table if not exists public.rate_limits (
+  id bigserial primary key,
+  subject text not null,          -- user id, or "ip:1.2.3.4" for anonymous
+  action text not null,           -- 'chat' | 'ingest'
+  created_at timestamptz not null default now()
+);
+
+create index if not exists rate_limits_lookup
+  on public.rate_limits (subject, action, created_at desc);
+
+alter table public.rate_limits enable row level security;
+-- No policy is defined on purpose: RLS with no policy denies all client access,
+-- so browsers can never read or forge these rows. Only the SECURITY DEFINER
+-- function below may touch the table.
+revoke all on public.rate_limits from anon, authenticated;
+
+/*
+  Sliding-window check-and-record, done in one round trip so two concurrent
+  requests can't both observe "under the limit" and both proceed.
+
+  SECURITY DEFINER because the table denies direct access; the function is the
+  only sanctioned door in. It records the attempt only when it is allowed, so a
+  blocked caller can't push their own window forward by hammering the endpoint.
+*/
+create or replace function public.check_rate_limit(
+  p_subject text,
+  p_action text,
+  p_limit integer,
+  p_window_seconds integer
+)
+returns table (allowed boolean, used integer, remaining integer, reset_seconds integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_used integer;
+  v_oldest timestamptz;
+begin
+  delete from public.rate_limits
+   where created_at < now() - interval '24 hours';
+
+  select count(*), min(created_at)
+    into v_used, v_oldest
+    from public.rate_limits
+   where subject = p_subject
+     and action = p_action
+     and created_at > now() - make_interval(secs => p_window_seconds);
+
+  if v_used < p_limit then
+    insert into public.rate_limits (subject, action) values (p_subject, p_action);
+    return query select true, v_used + 1, p_limit - v_used - 1, 0;
+  else
+    return query
+      select false,
+             v_used,
+             0,
+             greatest(
+               1,
+               ceil(extract(epoch from (v_oldest + make_interval(secs => p_window_seconds) - now())))::integer
+             );
+  end if;
+end;
+$$;
+
+revoke all on function public.check_rate_limit(text, text, integer, integer) from public;
+grant execute on function public.check_rate_limit(text, text, integer, integer) to anon, authenticated;

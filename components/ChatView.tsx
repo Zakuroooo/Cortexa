@@ -225,6 +225,11 @@ export default function ChatView() {
       });
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          // Restore what they typed so a throttled message isn't lost.
+          setInput(content);
+          setMessages((m) => m.filter((x) => x.id !== userMsg.id));
+        }
         throw new Error(j.error || `Request failed (${res.status})`);
       }
 

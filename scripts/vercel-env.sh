@@ -17,7 +17,10 @@ SCOPE="${VERCEL_SCOPE:-zakuroooos-projects}"
 
 # Never ship these. SERVICE_ROLE bypasses row-level security and is used only by
 # the local MCP server; the others are local-only too.
-SKIP_REGEX='^(SUPABASE_SERVICE_ROLE_KEY|CORTEXA_USER_ID|OLLAMA_BASE_URL)$'
+# VERCEL_OIDC_TOKEN is injected into .env.local by `vercel link` and is a
+# short-lived credential Vercel manages itself — pinning a stale copy of it
+# as a static env var is wrong and can break OIDC.
+SKIP_REGEX='^(SUPABASE_SERVICE_ROLE_KEY|CORTEXA_USER_ID|OLLAMA_BASE_URL|VERCEL_OIDC_TOKEN|VERCEL_.*)$'
 
 if command -v vercel >/dev/null 2>&1; then
   VC="vercel"
@@ -83,9 +86,56 @@ done < "$ENV_FILE"
 
 echo
 echo "$pushed pushed · $skipped skipped · $failed failed"
-[ $failed -gt 0 ] && { echo "✖ Some variables failed — fix them before deploying."; exit 1; }
+
+# ---- 4. VERIFY -------------------------------------------------------------
+# `vercel env add` can report success and store nothing. Trusting its exit code
+# once shipped a deployment missing NEXT_PUBLIC_SUPABASE_ANON_KEY, which failed
+# at runtime with a confusing "URL and Key are required" error. So: read back
+# what production will actually see, and retry anything that did not land.
+echo "→ Verifying what production will actually receive…"
+VERIFY_FILE="$(mktemp)"
+trap 'rm -f "$VERIFY_FILE"' EXIT
+$VC env pull "$VERIFY_FILE" --environment=production --yes $TOKEN_ARG >/dev/null 2>&1 || true
+
+missing=""
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|'#'*) continue ;; esac
+  case "$line" in *=*) ;; *) continue ;; esac
+  key="$(printf '%s' "${line%%=*}" | tr -d '[:space:]')"
+  [ -z "$key" ] && continue
+  printf '%s' "$key" | grep -qE "$SKIP_REGEX" && continue
+  [ -z "${line#*=}" ] && continue
+
+  if grep -qE "^${key}=" "$VERIFY_FILE" 2>/dev/null; then
+    echo "  ✔ $key present"
+  else
+    echo "  ✖ $key MISSING — retrying"
+    missing="$missing $key"
+    value="${line#*=}"
+    value="${value%\"}"; value="${value#\"}"
+    for target in production preview development; do
+      $VC env rm "$key" "$target" --yes $TOKEN_ARG >/dev/null 2>&1 || true
+      printf '%s' "$value" | $VC env add "$key" "$target" $TOKEN_ARG >/dev/null 2>&1 || true
+    done
+  fi
+done < "$ENV_FILE"
+
+if [ -n "$missing" ]; then
+  echo "→ Re-verifying retried variables…"
+  $VC env pull "$VERIFY_FILE" --environment=production --yes $TOKEN_ARG >/dev/null 2>&1 || true
+  for key in $missing; do
+    if grep -qE "^${key}=" "$VERIFY_FILE" 2>/dev/null; then
+      echo "  ✔ $key now present"
+    else
+      echo "  ✖ $key STILL missing — add it manually in the Vercel dashboard."
+      failed=$((failed+1))
+    fi
+  done
+fi
+
+[ $failed -gt 0 ] && { echo "✖ Refusing to deploy a half-configured environment."; exit 1; }
 [ $pushed -eq 0 ] && { echo "✖ Nothing pushed. Is $ENV_FILE populated?"; exit 1; }
 
-# ---- 4. deploy -------------------------------------------------------------
+# ---- 5. deploy -------------------------------------------------------------
 echo "→ Deploying to production…"
 $VC --prod $TOKEN_ARG
