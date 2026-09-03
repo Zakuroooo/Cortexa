@@ -115,7 +115,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
-                className="pr-11"
+                className="pr-12"
               />
               <button
                 type="button"
@@ -125,12 +125,14 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
                 tabIndex={-1}
                 aria-label={showPassword ? "Hide password" : "Show password"}
                 aria-pressed={showPassword}
-                className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-2 text-dim transition-colors hover:text-fg focus-visible:text-fg focus-visible:outline-none"
+                // text-dim was almost invisible against the dark field — the
+                // control has to be findable without hunting for it.
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-mut transition-colors hover:bg-hvr1 hover:text-fg focus-visible:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-acid/40"
               >
                 {showPassword ? (
-                  <EyeOff className="h-4 w-4" />
+                  <EyeOff className="h-[18px] w-[18px]" />
                 ) : (
-                  <Eye className="h-4 w-4" />
+                  <Eye className="h-[18px] w-[18px]" />
                 )}
               </button>
             </div>
