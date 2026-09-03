@@ -1,0 +1,25 @@
+# dependencies
+node_modules
+
+# next.js
+.next
+out
+build
+next-env.d.ts
+*.tsbuildinfo
+
+# secrets — NEVER commit these
+.env
+.env.local
+.env*.local
+.env.production
+
+# editor / os
+.DS_Store
+.vscode
+.idea
+*.swp
+
+# local tooling
+.claude
+.vercel
