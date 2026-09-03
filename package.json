@@ -10,7 +10,8 @@
     "test:keys": "node scripts/test-keys.mjs",
     "test:backend": "node scripts/test-backend.mjs",
     "test:agentic": "node scripts/test-agentic.mjs",
-    "mcp": "node mcp/server.mjs"
+    "mcp": "node mcp/server.mjs",
+    "deploy:env": "bash scripts/vercel-env.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
