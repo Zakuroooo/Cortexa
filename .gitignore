@@ -25,5 +25,7 @@ next-env.d.ts
 .vercel
 
 # private working notes — design docs, build history, study material
-docs/
+# (README screenshots in docs/images/ are the one public exception)
+docs/*
+!docs/images/
 .env*
