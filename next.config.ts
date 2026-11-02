@@ -9,8 +9,10 @@ import type { NextConfig } from "next";
  */
 const PY_WORKER_CSP = [
   "default-src 'none'",
+  // exact paths, not whole hosts: only this Pyodide release and PyPI's package API/files
+  // Pyodide's loader needs eval; it can't fetch anything, connect-src still decides that
   "script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'unsafe-eval'",
-  "connect-src https://cdn.jsdelivr.net https://pypi.org https://files.pythonhosted.org",
+  "connect-src https://cdn.jsdelivr.net/pyodide/v314.0.7/full/ https://pypi.org/simple/ https://pypi.org/pypi/ https://files.pythonhosted.org/packages/",
 ].join("; ");
 
 const nextConfig: NextConfig = {

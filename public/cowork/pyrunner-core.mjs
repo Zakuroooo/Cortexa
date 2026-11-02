@@ -56,6 +56,18 @@ import os, matplotlib
 os.environ["MPLBACKEND"] = "Agg"
 matplotlib.use("Agg")
 `);
+        // Extra layer: user code can't `import js` (the bridge to the worker's
+        // globals). The real network barrier is the worker's CSP (next.config.ts).
+        await py.runPythonAsync(`
+import sys
+class _BlockJs:
+    def find_spec(self, name, path=None, target=None):
+        if name == "js" or name.startswith("js."):
+            raise ImportError("The js module is disabled in the Cowork sandbox")
+        return None
+sys.modules.pop("js", None)
+sys.meta_path.insert(0, _BlockJs())
+`);
         net.deny();
         onStatus?.("Python ready");
       })();
