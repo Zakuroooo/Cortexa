@@ -26,7 +26,7 @@ export const SYSTEM = `You are Cortexa Cowork, an agent that does real work in t
 How you work:
 1. FIRST call update_todos with a short plan (2-8 items). Keep it updated as you go (mark items doing/done/failed, add or change items when the plan changes).
 2. Work step by step with tools. Look at the folder (list_files) before touching files.
-3. For anything involving data or office files, use run_python: pandas for CSV/Excel, openpyxl for .xlsx (write real formulas like "=SUM(B2:B9)" when totals are asked for), python-pptx for slides, python-docx for Word (use real hyperlinks or full URLs for sources), matplotlib for charts (plt.savefig("name.png")), pypdf for PDFs.
+3. For anything involving data or office files, use run_python: pandas for CSV/Excel, openpyxl for .xlsx (write real formulas like "=SUM(B2:B9)" when totals are asked for), python-pptx for slides, python-docx for Word (use real hyperlinks or full URLs for sources), matplotlib for charts (plt.savefig("name.png")), pypdf for PDFs (PdfReader(path).pages[i].extract_text()). These are the ONLY extra packages: there is no fitz/PyMuPDF, pdfplumber, requests or internet in Python.
 4. Save outputs as NEW files with clear names. Never overwrite or delete the user's originals unless the goal asks for it.
 5. If a tool fails (Python traceback, missing file), read the error, fix the cause, and try again or change the plan. Don't repeat the same failing call.
 6. For research with several sub-topics, use research_parallel. Cite sources (URLs) in what you write.
@@ -118,6 +118,15 @@ export async function runAgent(goal: string, deps: AgentDeps, budget = BUDGET): 
       if (asFinish) reply = { ...reply, content: "", toolCalls: [{ id: `finish_${turn}`, name: "finish", args: JSON.stringify(asFinish) }] };
     }
 
+    // Stopped using tools twice but made files? Treat it as finishing with those
+    // files — verify still decides whether the work is good enough.
+    if (!reply.toolCalls.length && nudges >= 2 && state.touched.size) {
+      reply = {
+        ...reply,
+        toolCalls: [{ id: `finish_${turn}`, name: "finish", args: JSON.stringify({ summary: reply.content.trim().slice(0, 600), outputs: [...state.touched] }) }],
+      };
+    }
+
     if (!reply.toolCalls.length) {
       messages.push({ role: "assistant", content: reply.content });
       if (++nudges > 2) return end("failed", reply.content, [...state.touched], turn, false, "The agent stopped using tools without calling finish.");
@@ -127,6 +136,7 @@ export async function runAgent(goal: string, deps: AgentDeps, budget = BUDGET): 
 
     messages.push({ role: "assistant", content: reply.content || null, tool_calls: reply.toolCalls });
     let finished: AgentResult | null = null;
+    const madePlan = state.todos.length > 0 || reply.toolCalls.some((t) => t.name === "update_todos");
 
     for (const tc of reply.toolCalls) {
       if (deps.shouldStop()) return end("stopped", "Stopped by user.", [...state.touched], turn, false);
@@ -170,6 +180,8 @@ export async function runAgent(goal: string, deps: AgentDeps, budget = BUDGET): 
       pushResult(messages, tc, outcome.content.slice(0, 6000));
     }
     if (finished) return finished;
+    // the plan is part of the product: remind once if the model skipped it
+    if (!madePlan && turn === 1) messages.push({ role: "user", content: "Call update_todos now with your plan before doing more." });
   }
   return end("failed", "", [...state.touched], budget.maxTurns, false, `Stopped after ${budget.maxTurns} turns without finishing.`);
 }
@@ -187,9 +199,12 @@ export async function llmWithPatience<T>(deps: AgentDeps, call: () => Promise<T>
       return await call();
     } catch (e: any) {
       const msg = String(e?.message || e);
-      if (i >= waits.length || !/busy|quota|429|rate limit/i.test(msg) || deps.shouldStop()) throw e;
-      deps.emit({ type: "status", text: `Free model quota is used up for this minute — waiting ${waits[i] / 1000} s…` });
-      await new Promise((r) => setTimeout(r, waits[i]));
+      const network = /failed to fetch|network|fetch failed|ECONNRESET|timeout/i.test(msg);
+      if (i >= waits.length || !(network || /busy|quota|429|rate limit/i.test(msg)) || deps.shouldStop()) throw e;
+      const wait = network ? 3000 : waits[i]; // a dropped connection just needs a quick retry
+      deps.emit({ type: "status", text: network ? "Connection dropped — retrying…" : `Free model quota is used up for this minute — waiting ${wait / 1000} s…` });
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
     }
   }
 }

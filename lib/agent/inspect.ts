@@ -18,7 +18,7 @@ def _inspect(p):
             df = pd.read_csv(p, sep="\t" if ext == "tsv" else ",")
             f.update(rows=int(df.shape[0]), cols=int(df.shape[1]), columns=[str(c) for c in df.columns][:20],
                      duplicate_rows=int(df.duplicated().sum()), empty_cells=int(df.isna().sum().sum()),
-                     head=df.head(3).astype(str).values.tolist())
+                     head=df.head(3).fillna("").astype(str).values.tolist())
         elif ext in ("xlsx", "xlsm"):
             import openpyxl
             wb = openpyxl.load_workbook(p)
@@ -60,12 +60,22 @@ def _inspect(p):
     return f
 `;
 
+// pandas 3 keeps missing values as NaN even after astype(str); NaN is not valid JSON
+export const SAFE_DUMPS_PY = String.raw`
+import math
+def _clean(o):
+    if isinstance(o, float) and (math.isnan(o) or math.isinf(o)): return None
+    if isinstance(o, dict): return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)): return [_clean(v) for v in o]
+    return o
+`;
+
 export type FileFacts = Record<string, Record<string, any>>;
 
 /** `extra`: files to inspect that are not in the folder (e.g. originals before the task). */
 export async function inspectFiles(python: PythonSandbox, ws: Workspace, paths: string[], extra: FileMap = {}): Promise<FileFacts> {
   const files = { ...(await snapshot(ws)).files, ...extra };
-  const code = `${INSPECT_PY}\nprint("@@FACTS@@" + json.dumps({p: _inspect(p) for p in ${JSON.stringify(paths)}}))`;
+  const code = `${INSPECT_PY}\n${SAFE_DUMPS_PY}\nprint("@@FACTS@@" + json.dumps(_clean({p: _inspect(p) for p in ${JSON.stringify(paths)}}), default=str))`;
   const r = await python.run(code, files, { timeoutMs: 90_000 });
   const line = r.stdout.split("\n").find((l) => l.startsWith("@@FACTS@@"));
   if (!line) throw new Error(`Could not inspect files: ${r.error ?? "no output"}`);

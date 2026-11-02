@@ -12,7 +12,8 @@ const OUT = "docs/images/cowork";
 const GOAL =
   "Read the 3 vendor contracts in contracts/ and build risk_matrix.xlsx: one row per vendor with liability, termination and data-location risk scores (1-5) and a Total column that is an Excel SUM formula. Then make a bar chart of the totals as risk_chart.png.";
 
-const browser = await chromium.launch({ channel: undefined });
+// CHROME_PATH: use an already-downloaded Chromium (e.g. from ~/Library/Caches/ms-playwright)
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: "dark" });
 await page.goto(`${BASE}/login`);
 await page.fill('input[type="email"]', env.LOCAL_DEMO_EMAIL);
