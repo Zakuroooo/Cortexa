@@ -15,9 +15,31 @@ const FROM_PYPI = ["openpyxl", "python-pptx", "python-docx", "pypdf"];
 const MAX_OUTPUT = 20000;
 const WORK = "/work";
 
+/**
+ * Network lock. Python in Pyodide can reach the browser's fetch/XHR through
+ * the "js" module, so a poisoned file could make the code send data out.
+ * The network is open ONLY while Pyodide loads packages, and closed while
+ * user code runs. (Same for the Node worker used by evals.)
+ */
+function makeNetLock() {
+  const g = globalThis;
+  // bind: the browser's fetch must be called with the worker as `this`
+  const real = { fetch: g.fetch.bind(g), XMLHttpRequest: g.XMLHttpRequest, WebSocket: g.WebSocket, importScripts: g.importScripts?.bind(g) };
+  let open = true;
+  const blocked = () => {
+    throw new Error("Network access is disabled inside the Python sandbox");
+  };
+  g.fetch = (...a) => (open ? real.fetch(...a) : Promise.reject(new Error("Network access is disabled inside the Python sandbox")));
+  if (real.XMLHttpRequest) g.XMLHttpRequest = function () { if (!open) blocked(); return new real.XMLHttpRequest(); };
+  if (real.WebSocket) g.WebSocket = function (...a) { if (!open) blocked(); return new real.WebSocket(...a); };
+  if (real.importScripts) g.importScripts = (...a) => (open ? real.importScripts(...a) : blocked());
+  return { allow: () => (open = true), deny: () => (open = false) };
+}
+
 export function createRunner(loadPyodide, options = {}) {
   let py = null;
   let ready = null;
+  const net = makeNetLock();
 
   function ensureReady(onStatus) {
     if (!ready) {
@@ -34,6 +56,7 @@ import os, matplotlib
 os.environ["MPLBACKEND"] = "Agg"
 matplotlib.use("Agg")
 `);
+        net.deny();
         onStatus?.("Python ready");
       })();
     }
@@ -85,8 +108,14 @@ matplotlib.use("Agg")
     let error = null;
     let result = null;
     try {
-      // fetch any other Pyodide package the code imports (e.g. scipy)
-      await py.loadPackagesFromImports(code, { messageCallback: () => {} });
+      // Fetch any other package from Pyodide's own list that the code imports
+      // (e.g. scipy). Network is open only for this, then closed again.
+      net.allow();
+      try {
+        await py.loadPackagesFromImports(code, { messageCallback: () => {} });
+      } finally {
+        net.deny();
+      }
       const value = await py.runPythonAsync(code);
       if (value !== undefined && value !== null) result = String(value).slice(0, 4000);
       value?.destroy?.();

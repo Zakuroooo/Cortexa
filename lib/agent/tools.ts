@@ -32,6 +32,10 @@ export interface RunState {
   seenUrls: Set<string>;
   /** files this task created or changed */
   touched: Set<string>;
+  /** first version of every existing file the task changed — verify compares against it */
+  originals: Map<string, Uint8Array>;
+  /** files whose row loss verify already pointed out */
+  flaggedLoss: Set<string>;
 }
 
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|jsonl|py|js|ts|html|htm|xml|yaml|yml|log|ini|toml|sql)$/i;
@@ -209,7 +213,10 @@ export async function runTool(name: string, args: Record<string, any>, deps: Age
       const path = normalizePath(args.path);
       const content = String(args.content ?? "");
       if (await ws.exists(path)) {
-        if (!(await deps.approve(`Overwrite the existing file "${path}"?`))) return fail(`User did not allow overwriting ${path}. Write to a new file name instead.`);
+        const old = (await ws.read(path)) ?? new Uint8Array();
+        if (!(await deps.approve(`Overwrite the existing file "${path}" (${describeChange(old, enc.encode(content))})?`)))
+          return fail(`User did not allow overwriting ${path}. Write to a new file name instead.`);
+        if (!state.originals.has(path)) state.originals.set(path, old);
       }
       await ws.write(path, enc.encode(content));
       state.touched.add(path);
@@ -279,6 +286,14 @@ export async function runTool(name: string, args: Record<string, any>, deps: Age
   return fail(`Unknown tool: ${name}`);
 }
 
+/** "264 B → 72 B, 13 → 3 lines" — so the user sees what an overwrite really does. */
+export function describeChange(before: Uint8Array, after: Uint8Array): string {
+  const lines = (b: Uint8Array) => dec.decode(b).split("\n").filter((l) => l.trim()).length;
+  const sizes = `${before.length} B → ${after.length} B`;
+  const textLike = (b: Uint8Array) => !b.subarray(0, 512).includes(0);
+  return textLike(before) && textLike(after) ? `${sizes}, ${lines(before)} → ${lines(after)} lines` : sizes;
+}
+
 async function runPython(code: string, deps: AgentDeps, state: RunState): Promise<ToolOutcome> {
   if (!code.trim()) return fail("code is empty");
   const { files: before, skipped } = await snapshot(deps.workspace);
@@ -291,23 +306,40 @@ async function runPython(code: string, deps: AgentDeps, state: RunState): Promis
   const notes: string[] = [];
   if (r.ok || Object.keys(r.files).length) {
     const changes = r.timedOut ? { created: [], modified: [], deleted: [] } : diffFiles(before, r.files);
+    // A "new" path may still exist in the folder: a file too big to copy into
+    // Python was invisible to it. Writing it would be an overwrite, so it's risky.
+    for (const p of [...changes.created]) {
+      if (await deps.workspace.exists(p)) {
+        changes.created = changes.created.filter((x) => x !== p);
+        changes.modified.push(p);
+      }
+    }
     // new files: always fine — they can't destroy anything
     for (const p of changes.created) {
       await deps.workspace.write(p, r.files[p]);
       state.touched.add(p);
       saved.push(p);
     }
-    // changing or deleting existing files: the user decides
-    const risky = [...changes.modified.map((p) => `change ${p}`), ...changes.deleted.map((p) => `delete ${p}`)];
+    // changing or deleting existing files: the user decides, seeing what changes
+    const risky = [
+      ...(await Promise.all(changes.modified.map(async (p) => `change ${p} (${describeChange((await deps.workspace.read(p)) ?? new Uint8Array(), r.files[p])})`))),
+      ...changes.deleted.map((p) => `delete ${p}`),
+    ];
     if (risky.length) {
       const ok = await deps.approve(`Python wants to ${risky.join(", ")}. Allow?`);
       if (ok) {
         for (const p of changes.modified) {
+          const old = await deps.workspace.read(p);
+          if (old && !state.originals.has(p)) state.originals.set(p, old);
           await deps.workspace.write(p, r.files[p]);
           state.touched.add(p);
           saved.push(p);
         }
-        for (const p of changes.deleted) await deps.workspace.remove(p);
+        for (const p of changes.deleted) {
+          const old = await deps.workspace.read(p);
+          if (old && !state.originals.has(p)) state.originals.set(p, old);
+          await deps.workspace.remove(p);
+        }
       } else notes.push(`User did NOT allow: ${risky.join(", ")}. Those changes were discarded — write new files instead.`);
     }
   }

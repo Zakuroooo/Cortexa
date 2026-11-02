@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { normalizePath, MemoryWorkspace } from "@/lib/agent/workspace";
 import { runTool, urlAllowed, rememberUrls, type AgentDeps, type RunState } from "@/lib/agent/tools";
-import { compact, finishFromText, llmWithPatience } from "@/lib/agent/agent";
+import { compact, finishFromText, llmWithPatience, rowLosses } from "@/lib/agent/agent";
 import { looksLikeInjection, wrapUntrusted } from "@/lib/agent/safety";
 import { retryAfterMs } from "@/lib/agent/backoff";
 import { isBlockedIP, assertPublicUrl } from "@/lib/agent/server/safe-fetch";
@@ -30,7 +30,7 @@ function fakeDeps(ws: MemoryWorkspace, answer: boolean) {
     emit: (e) => events.push(e),
     shouldStop: () => false,
   };
-  const state: RunState = { todos: [], seenUrls: new Set(), touched: new Set() };
+  const state: RunState = { todos: [], seenUrls: new Set(), touched: new Set(), originals: new Map(), flaggedLoss: new Set() };
   return { deps, state, asked, events, serverCalls };
 }
 
@@ -90,6 +90,29 @@ describe("approval gates", () => {
   });
 });
 
+describe("overwrite safety", () => {
+  it("a 'new' file from Python that already exists (too big to copy) is treated as an overwrite", async () => {
+    const ws = new MemoryWorkspace("f", { "big.csv": enc("original") });
+    const t = fakeDeps(ws, false);
+    t.deps.python.run = async () => ({ ok: true, stdout: "", stderr: "", files: { "big.csv": enc("clobbered") } });
+    // simulate: snapshot skipped big.csv, so Python saw an empty folder
+    const origList = ws.list.bind(ws);
+    ws.list = async () => (await origList()).filter((f) => f.path !== "big.csv");
+    await runTool("run_python", { code: "x" }, t.deps, t.state);
+    expect(t.asked).toHaveLength(1);
+    expect(dec(await ws.read("big.csv"))).toBe("original");
+  });
+
+  it("approval text shows what the change does, and the original is kept for verify", async () => {
+    const ws = new MemoryWorkspace("f", { "sales.csv": enc("a\n1\n2\n3\n") });
+    const t = fakeDeps(ws, true);
+    t.deps.python.run = async (_c, files) => ({ ok: true, stdout: "", stderr: "", files: { ...files, "sales.csv": enc("a\n1\n") } });
+    await runTool("run_python", { code: "x" }, t.deps, t.state);
+    expect(t.asked[0]).toMatch(/4 → 2 lines/);
+    expect(dec(t.state.originals.get("sales.csv") ?? null)).toBe("a\n1\n2\n3\n");
+  });
+});
+
 describe("URL provenance — blocks data exfiltration", () => {
   it("only opens URLs from the goal, search results or pages read", async () => {
     const t = fakeDeps(new MemoryWorkspace(), true);
@@ -136,6 +159,13 @@ describe("agent helpers", () => {
     const out = compact(msgs, 4);
     expect(out[2].content!.length).toBeLessThan(400);
     expect(out[out.length - 1].content!.length).toBe(1000);
+  });
+
+  it("flags a table that lost many rows, once", () => {
+    const state: RunState = { todos: [], seenUrls: new Set(), touched: new Set(), originals: new Map([["sales.csv", enc("x")]]), flaggedLoss: new Set() };
+    const facts = { "ORIGINAL_BEFORE_TASK/sales.csv": { rows: 12 }, "sales.csv": { rows: 5 } };
+    expect(rowLosses(facts, state)[0]).toMatch(/12 data rows before .* 5 now/);
+    expect(rowLosses(facts, state)).toHaveLength(0);
   });
 
   it("reads finish arguments written as text", () => {

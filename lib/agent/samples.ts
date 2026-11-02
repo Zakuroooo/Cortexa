@@ -1,4 +1,4 @@
-/** Test files for the Cowork evals. Everything is generated, nothing downloaded. */
+/** Sample files — used by the evals and by the "Try sample files" button. Everything is generated, nothing downloaded. */
 
 const enc = new TextEncoder();
 export const text = (s: string) => enc.encode(s);
@@ -138,3 +138,13 @@ Meera,91,excellent
 Imran,65,ok
 `;
 export const SCORES_AVG = (82 + 74 + 91 + 65) / 4; // 78
+
+/** The starter set for the Cowork page's "Try sample files" button. */
+export function sampleFolder(): Record<string, Uint8Array> {
+  return {
+    "sales.csv": text(SALES_CSV),
+    "notes.md": text(DECK_NOTES),
+    "budget.csv": text(BUDGET_CSV),
+    ...Object.fromEntries(Object.entries(VENDOR_PDFS).map(([p, l]) => [p, makePdf(l)])),
+  };
+}

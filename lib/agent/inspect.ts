@@ -2,7 +2,7 @@
  * Open output files with Python and describe what is really inside them.
  * Used by the agent's final verify step and by the eval checks.
  */
-import type { PythonSandbox } from "./sandbox";
+import type { FileMap, PythonSandbox } from "./sandbox";
 import { snapshot, type Workspace } from "./workspace";
 
 export const INSPECT_PY = String.raw`
@@ -62,8 +62,9 @@ def _inspect(p):
 
 export type FileFacts = Record<string, Record<string, any>>;
 
-export async function inspectFiles(python: PythonSandbox, ws: Workspace, paths: string[]): Promise<FileFacts> {
-  const { files } = await snapshot(ws);
+/** `extra`: files to inspect that are not in the folder (e.g. originals before the task). */
+export async function inspectFiles(python: PythonSandbox, ws: Workspace, paths: string[], extra: FileMap = {}): Promise<FileFacts> {
+  const files = { ...(await snapshot(ws)).files, ...extra };
   const code = `${INSPECT_PY}\nprint("@@FACTS@@" + json.dumps({p: _inspect(p) for p in ${JSON.stringify(paths)}}))`;
   const r = await python.run(code, files, { timeoutMs: 90_000 });
   const line = r.stdout.split("\n").find((l) => l.startsWith("@@FACTS@@"));

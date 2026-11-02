@@ -17,6 +17,7 @@ import {
   Play,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Upload,
   Users,
   XCircle,
@@ -28,6 +29,7 @@ import { createBrowserSandbox } from "@/lib/agent/sandbox-browser";
 import { callLlm, callServerTool, loadHistory, loadTaskEvents, TaskHistory, type PastTask } from "@/lib/agent/client";
 import { MemoryWorkspace, folderAccessSupported, pickFolder, toZip, type FileInfo, type Workspace } from "@/lib/agent/workspace";
 import type { AgentEvent, Todo } from "@/lib/agent/types";
+import { sampleFolder } from "@/lib/agent/samples";
 import type { PythonSandbox } from "@/lib/agent/sandbox";
 import { cn, formatBytes, timeAgo, truncate } from "@/lib/utils";
 
@@ -81,10 +83,10 @@ export default function CoworkApp() {
     }
   }
 
-  async function useVirtual() {
-    const w = new MemoryWorkspace("Virtual folder");
+  async function openVirtual(withSamples = false) {
+    const w = new MemoryWorkspace(withSamples ? "Sample folder" : "Virtual folder", withSamples ? sampleFolder() : {});
     setWs(w);
-    setFiles([]);
+    await refreshFiles(w);
   }
 
   async function upload(list: FileList | null) {
@@ -117,7 +119,10 @@ export default function CoworkApp() {
   }
 
   function emit(e: AgentEvent) {
-    if (e.type === "status") return setStatus(e.text);
+    if (e.type === "status") {
+      if (e.text === "Python ready") setPyReady(true);
+      return setStatus(e.text);
+    }
     if (e.type === "todos") setTodos(e.todos);
     if (e.type === "tool_result" && e.files?.length) {
       setTouched((t) => new Set([...t, ...e.files!]));
@@ -220,8 +225,11 @@ export default function CoworkApp() {
               <FolderOpen className="h-4 w-4" /> Open a folder
             </Button>
             {!folderAccessSupported() && <p className="text-[11px] text-dim">Real folders need Chrome or Edge.</p>}
-            <Button variant="secondary" className="w-full" onClick={useVirtual}>
+            <Button variant="secondary" className="w-full" onClick={() => openVirtual()}>
               <FolderPlus className="h-4 w-4" /> Virtual folder
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={() => openVirtual(true)}>
+              <Sparkles className="h-4 w-4" /> Try sample files
             </Button>
             <p className="pt-2 text-[11px] leading-relaxed text-dim">
               The agent works only inside the folder you choose. Deleting or overwriting a file always asks you first.

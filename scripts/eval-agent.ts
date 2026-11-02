@@ -24,7 +24,7 @@ import { embedTexts } from "@/lib/ai/embeddings";
 import type { AgentDeps } from "@/lib/agent/tools";
 import type { AgentEvent } from "@/lib/agent/types";
 import type { FileMap } from "@/lib/agent/sandbox";
-import * as F from "./fixtures";
+import * as F from "@/lib/agent/samples";
 
 const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 if (!/^http:\/\/(127\.0\.0\.1|localhost)/.test(SB_URL)) {
