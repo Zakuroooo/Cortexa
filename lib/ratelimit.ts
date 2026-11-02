@@ -8,7 +8,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type LimitAction = "chat" | "ingest";
+export type LimitAction = "chat" | "ingest" | "task";
 
 export interface LimitResult {
   allowed: boolean;
@@ -30,6 +30,8 @@ interface Rule {
 const RULES: Record<LimitAction, Rule> = {
   chat: { limit: 30, windowSeconds: 60 * 60 },
   ingest: { limit: 10, windowSeconds: 60 * 60 },
+  // a task runs up to 8 LLM-backed steps, so it gets a much smaller allowance
+  task: { limit: 10, windowSeconds: 60 * 60 },
 };
 
 /**
@@ -43,6 +45,7 @@ const RULES: Record<LimitAction, Rule> = {
 const GLOBAL_RULES: Record<LimitAction, Rule> = {
   chat: { limit: 300, windowSeconds: 60 * 60 },
   ingest: { limit: 60, windowSeconds: 60 * 60 },
+  task: { limit: 40, windowSeconds: 60 * 60 },
 };
 
 /** Disable locally so development isn't throttled. */

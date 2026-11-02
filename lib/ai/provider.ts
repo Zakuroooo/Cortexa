@@ -192,6 +192,9 @@ async function streamOpenAICompatible(
     } catch {
       continue;
     }
+    // Groq reports some failures (e.g. tool_use_failed) inside the stream with
+    // a 200 status. Surface them instead of returning an empty answer.
+    if (json.error) throw fail(String(json.error.message || "Provider stream error"));
     const delta = json.choices?.[0]?.delta;
     if (!delta) continue;
     if (typeof delta.content === "string" && delta.content) {
