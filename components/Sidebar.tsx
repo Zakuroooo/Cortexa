@@ -10,6 +10,7 @@ import {
   BrainCircuit,
   Settings,
   LogOut,
+  Bot,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -21,6 +22,7 @@ const SECTIONS = [
     items: [
       { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
       { href: "/chat", label: "Chat & Agent", icon: MessageSquareText },
+      { href: "/cowork", label: "Cowork", icon: Bot },
     ],
   },
   {
